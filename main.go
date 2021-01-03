@@ -1,57 +1,54 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"os"
-	"regexp"
-	"strings"
+    "strings"
+    "os/exec"
+    "runtime"
+    "fmt"
+    "bufio"
 	"sync"
-    "flag"
+    "os"
 )
 
+var wg sync.WaitGroup
+
 func main() {
-	var domain_input = flag.String("d", "", "Domain to generate subdomains with")
-    flag.Parse()
-    domain := *domain_input
-    fmt.Println(domain)
-	processed := make(chan string)
-	subdomains := make(chan string)
-	domains := make(map[string]struct{})
-	var wg sync.WaitGroup
+	runtime.GOMAXPROCS(30)
+    os.Mkdir("output", 0755)
 
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
+    sc := bufio.NewScanner(os.Stdin)
+    for sc.Scan() {
+        ipport := strings.ToLower(sc.Text())
+	    wg.Add(1)
+		go ScanLine(ipport, &wg)
+    }
 
-		go func() {
-			for subdomain := range subdomains {
-				reg, _ := regexp.Compile("[^a-zA-Z0-9-.]+")
-				record := reg.ReplaceAllString(strings.ToLower(subdomain+"."+domain), "")
-				processed <- record
-
-			}
-
-			wg.Done()
-		}()
-	}
-
-	go func() {
-		sc := bufio.NewScanner(os.Stdin)
-		for sc.Scan() {
-			subdomains <- sc.Text()
-		}
-		close(subdomains)
-	}()
-	go func() {
-		wg.Wait()
-		close(processed)
-	}()
-	for domain := range processed {
-		_, ok := domains[domain]
-		if !ok {
-			domains[domain] = struct{}{}
-			fmt.Println(domain)
-		}
-	}
-
+    wg.Wait()
 }
+
+
+// ScanLine takes input as ip:port and scans using nmap
+func ScanLine(ipport string, wg *sync.WaitGroup) (err error) {
+
+    defer wg.Done()
+
+    s := strings.Split(ipport, ":")
+
+    ip := s[0]
+    port := s[1]
+    filename := fmt.Sprintf("output/%s_%s.xml", ip, port)
+
+    fmt.Println("nmap -T4 -Pn -sV  -oX ", filename, " -p", port, " ", ip)
+    cmd := exec.Command("nmap", "-T4", "-sV",  "-Pn", "-oX",filename, "-p", port, ip)
+    
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+    err = cmd.Run()
+    
+    if err != nil {
+        return
+    }
+
+    return nil
+}
+
